@@ -1,5 +1,5 @@
-# Конфигурационное управление домашнее задание номер 1 
-### Лысогорский Михаил Сергеевич ИКБО-62-23
+# Конфигурационное управление домашнее задание номер 1 15 вариант
+### Лысогорский Михаил Сергеевич ИКБО-62-23 
 
 # Cкрипт emulator.py
 ```
@@ -11,6 +11,8 @@ from tkinter import scrolledtext, messagebox
 import json
 import datetime
 import sys
+import shutil
+import tempfile
 
 def read_config(config_path):
     """
@@ -20,7 +22,7 @@ def read_config(config_path):
     try:
         tree = ET.parse(config_path)
     except ET.ParseError as e:
-        raise ValueError(f"Error parsing config file: {e}")
+        raise ValueError(f"Ошибка при парсинге конфигурационного файла: {e}")
     root = tree.getroot()
     
     computer_name = root.find('computer_name')
@@ -28,7 +30,7 @@ def read_config(config_path):
     log_path = root.find('log_path')
     
     if computer_name is None or vfs_path is None or log_path is None:
-        raise ValueError("Config file is missing required fields.")
+        raise ValueError("Конфигурационный файл отсутствует необходимые поля.")
     
     # Расширение пути с '~' до полного пути
     vfs_path = os.path.expanduser(vfs_path.text)
@@ -44,15 +46,15 @@ class VirtualFileSystem:
         self.tar_path = tar_path
         try:
             self.tar = tarfile.open(tar_path, 'r')
-            print(f"Successfully opened tar archive: {tar_path}")
+            print(f"Успешно открыт tar-архив: {tar_path}")
         except FileNotFoundError:
-            messagebox.showerror("Error", f"Virtual File System archive not found: {tar_path}")
+            messagebox.showerror("Ошибка", f"Архив виртуальной файловой системы не найден: {tar_path}")
             sys.exit(1)
         except tarfile.ReadError:
-            messagebox.showerror("Error", f"Failed to read tar archive: {tar_path}")
+            messagebox.showerror("Ошибка", f"Не удалось прочитать tar-архив: {tar_path}")
             sys.exit(1)
         self.current_path = ''  # Инициализируем как пустую строку для корня
-        print(f"Initial current_path set to: '{self.current_path}'")
+        print(f"Начальный текущий путь установлен: '{self.current_path}'")
 
     def list_dir(self):
         """
@@ -62,49 +64,49 @@ class VirtualFileSystem:
         dirs = set()
         files = set()
         current_path = self.current_path.rstrip('/')  # Убираем завершающий слэш
-        print(f"\nListing directory. Current Path: '{current_path}'")
+        print(f"\nПросмотр каталога. Текущий путь: '{current_path}'")
 
         for member in members:
             if member.name == './':
-                print(f"Skipping member: '{member.name}'")
+                print(f"Пропуск члена: '{member.name}'")
                 continue
 
             normalized_name = member.name.lstrip('./')  # Убираем './' префикс
             member_dir = os.path.dirname(normalized_name)
-            print(f"Checking member: '{member.name}', normalized_name: '{normalized_name}', member_dir: '{member_dir}'")
+            print(f"Обработка члена: '{member.name}', нормализованное имя: '{normalized_name}', директория члена: '{member_dir}'")
 
             if current_path == '':
-                # Корневой каталог: файлы и директории без слэшей
+                # Корневой каталог: файлы и директории без дополнительных слэшей
                 if member.isdir() and normalized_name.endswith('/') and normalized_name.count('/') == 1:
                     dir_name = os.path.basename(normalized_name.rstrip('/'))
                     dirs.add(dir_name)
-                    print(f"Found directory: '{dir_name}'")
+                    print(f"Найдена директория: '{dir_name}'")
                 elif not member.isdir() and normalized_name.count('/') == 0:
                     file_name = os.path.basename(normalized_name)
                     files.add(file_name)
-                    print(f"Found file: '{file_name}'")
+                    print(f"Найден файл: '{file_name}'")
             else:
                 # Подкаталоги: проверяем соответствие текущему пути
                 if member_dir == current_path:
                     name = os.path.basename(normalized_name)
                     if member.isdir():
                         dirs.add(name)
-                        print(f"Found directory: '{name}'")
+                        print(f"Найдена директория: '{name}'")
                     else:
                         files.add(name)
-                        print(f"Found file: '{name}'")
-        print(f"Directories: {dirs}, Files: {files}\n")
+                        print(f"Найден файл: '{name}'")
+        print(f"Директории: {dirs}, Файлы: {files}\n")
         return sorted(dirs), sorted(files)
 
     def change_dir(self, path):
         """
         Изменяет текущий каталог.
         """
-        print(f"\nChanging directory to: '{path}'")
+        print(f"\nИзменение каталога на: '{path}'")
         if path == '..':
             if self.current_path != '':
                 self.current_path = os.path.dirname(self.current_path.rstrip('/'))
-                print(f"Moved up to: '{self.current_path}'")
+                print(f"Перешли на уровень выше: '{self.current_path}'")
         else:
             # Обработка абсолютных путей
             if path.startswith('/'):
@@ -115,16 +117,16 @@ class VirtualFileSystem:
                 new_path += '/'
             # Нормализация пути
             new_path = os.path.normpath(new_path) + '/'
-            print(f"Normalized new path: '{new_path}'")
+            print(f"Нормализованный новый путь: '{new_path}'")
             # Проверка существования директории
-            exists = any(m.name == f'./{new_path.rstrip("/")}/' for m in self.tar.getmembers() if m.isdir())
-            print(f"Directory exists: {exists}")
+            exists = any(m.name.rstrip('/') == f'./{new_path.rstrip("/")}' for m in self.tar.getmembers() if m.isdir())
+            print(f"Директория существует: {exists}")
             if exists:
                 self.current_path = new_path.rstrip('/')
-                print(f"Current path updated to: '{self.current_path}'")
+                print(f"Текущий путь обновлён до: '{self.current_path}'")
             else:
-                print(f"No such directory: {path}")
-                raise FileNotFoundError(f"No such directory: {path}")
+                print(f"Нет такой директории: {path}")
+                raise FileNotFoundError(f"Нет такой директории: {path}")
 
     def get_pwd(self):
         """
@@ -141,9 +143,9 @@ class VirtualFileSystem:
             if member.isfile():
                 return self.tar.extractfile(member).read().decode('utf-8')
             else:
-                raise IsADirectoryError(f"{file_path} is a directory")
+                raise IsADirectoryError(f"{file_path} является директорией")
         except KeyError:
-            raise FileNotFoundError(f"No such file: {file_path}")
+            raise FileNotFoundError(f"Нет такого файла: {file_path}")
 
 class ShellEmulatorGUI:
     """
@@ -156,7 +158,7 @@ class ShellEmulatorGUI:
         self.log_path = log_path
         self.history = []
         
-        master.title("Shell Emulator")
+        master.title("Эмулятор Shell")
         
         # Настройка области вывода
         self.output_area = scrolledtext.ScrolledText(master, state='disabled', width=80, height=20, bg="black", fg="white", font=("Courier", 12))
@@ -176,7 +178,8 @@ class ShellEmulatorGUI:
         """
         Обновляет приглашение к вводу.
         """
-        self.prompt = f"{self.computer_name}:{self.vfs.get_pwd()}$ "
+        display_path = self.vfs.get_pwd() if self.vfs.get_pwd() != '' else '/'
+        self.prompt = f"{self.computer_name}:{display_path}$ "
 
     def write_output(self, text, newline=True):
         """
@@ -215,20 +218,20 @@ class ShellEmulatorGUI:
                 if args:
                     self.cmd_cd(args[0])
                 else:
-                    self.write_output("cd: missing argument")
+                    self.write_output("cd: отсутствует аргумент")
             elif command == 'pwd':
                 self.cmd_pwd()
             elif command == 'cp':
                 if len(args) == 2:
                     self.cmd_cp(args[0], args[1])
                 else:
-                    self.write_output("cp: requires source and destination")
+                    self.write_output("cp: требуется исходный и конечный файл")
             elif command == 'echo':
                 self.cmd_echo(' '.join(args))
             elif command == 'exit':
                 self.master.quit()
             else:
-                self.write_output(f"{command}: command not found")
+                self.write_output(f"{command}: команда не найдена")
         except Exception as e:
             self.write_output(str(e))
         
@@ -239,7 +242,7 @@ class ShellEmulatorGUI:
         """
         Реализует команду 'ls'.
         """
-        print("Executing 'ls' command")
+        print("Выполнение команды 'ls'")
         dirs, files = self.vfs.list_dir()
         if not dirs and not files:
             self.write_output(".")
@@ -251,51 +254,52 @@ class ShellEmulatorGUI:
         """
         Реализует команду 'cd'.
         """
-        print(f"Executing 'cd' command with argument: {path}")
+        print(f"Выполнение команды 'cd' с аргументом: {path}")
         self.vfs.change_dir(path)
 
     def cmd_pwd(self):
         """
         Реализует команду 'pwd'.
         """
-        print("Executing 'pwd' command")
+        print("Выполнение команды 'pwd'")
         pwd = self.vfs.get_pwd()
-        self.write_output(pwd)
+        display_pwd = pwd if pwd != '' else '/'
+        self.write_output(display_pwd)
 
     def cmd_cp(self, src, dest):
         """
         Реализует команду 'cp'.
         Эмуляция копирования файлов внутри VFS.
         """
-        print(f"Executing 'cp' command with arguments: {src}, {dest}")
+        print(f"Выполнение команды 'cp' с аргументами: {src}, {dest}")
         try:
             # Проверка существования исходного файла
             src_path = os.path.join(self.vfs.get_pwd(), src).strip('/')
-            member = self.vfs.tar.getmember(src_path)  # Проверка существования
-            if not member.isfile():
-                self.write_output(f"cp: '{src}' is not a file")
+            src_member = self.vfs.tar.getmember(f'./{src_path}')
+            if not src_member.isfile():
+                self.write_output(f"cp: '{src}' не является файлом")
                 return
             
             # Проверка, что dest не существует
             dest_path = os.path.join(self.vfs.get_pwd(), dest).strip('/')
             try:
-                self.vfs.tar.getmember(dest_path)
-                self.write_output(f"cp: cannot copy to '{dest}': File exists")
+                self.vfs.tar.getmember(f'./{dest_path}')
+                self.write_output(f"cp: не удалось скопировать в '{dest}': файл существует")
                 return
             except KeyError:
                 pass  # Dest не существует, можно копировать
             
             # Эмуляция копирования: поскольку tar-архив не изменяется,
             # мы просто сообщаем об успешном копировании.
-            self.write_output(f"cp: '{src}' to '{dest}' copied successfully (эмуляция)")
+            self.write_output(f"cp: '{src}' в '{dest}' успешно скопировано (эмуляция)")
         except KeyError:
-            self.write_output(f"cp: cannot stat '{src}': No such file or directory")
+            self.write_output(f"cp: невозможно найти '{src}': файл или директория не существует")
 
     def cmd_echo(self, text):
         """
         Реализует команду 'echo'.
         """
-        print(f"Executing 'echo' command with text: {text}")
+        print(f"Выполнение команды 'echo' с текстом: {text}")
         self.write_output(text)
 
     def log_action(self, command):
@@ -310,26 +314,26 @@ class ShellEmulatorGUI:
         try:
             with open(self.log_path, 'w') as log_file:
                 json.dump(self.history, log_file, indent=4)
-            print(f"Logged command: {command}")
+            print(f"Логирование команды: {command}")
         except Exception as e:
-            messagebox.showerror("Logging Error", f"Failed to write log: {e}")
+            messagebox.showerror("Ошибка Логирования", f"Не удалось записать лог: {e}")
 
 def main():
     """
     Основная функция для запуска эмулятора.
     """
     if len(sys.argv) != 2:
-        print("Usage: python emulator.py <config.xml>")
+        print("Использование: python emulator.py <config.xml>")
         sys.exit(1)
     
     config_path = sys.argv[1]
     try:
         computer_name, vfs_path, log_path = read_config(config_path)
-        print(f"Computer Name: {computer_name}")
-        print(f"VFS Path: {vfs_path}")
-        print(f"Log Path: {log_path}")
+        print(f"Имя компьютера: {computer_name}")
+        print(f"Путь к VFS: {vfs_path}")
+        print(f"Путь к лог-файлу: {log_path}")
     except Exception as e:
-        print(f"Error reading config: {e}")
+        print(f"Ошибка чтения конфигурации: {e}")
         sys.exit(1)
     
     root = tk.Tk()
@@ -338,6 +342,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 ```
@@ -380,4 +385,5 @@ python3 emulator.py config.xml
 
 ```
 # Проверка команд 
+![{7EC6DE07-2CC4-47E5-BD93-3A19FF4ECAE5}](https://github.com/user-attachments/assets/08de35ac-4565-4acd-8980-c436162f05d0)
 

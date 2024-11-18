@@ -40,13 +40,16 @@ def read_config(config_path):
 
 class VirtualFileSystem:
     """
-    Класс для работы с виртуальной файловой системой, основанной на tar-архиве.
+    Класс для работы с виртуальной файловой системой, основанной на временной директории.
     """
     def __init__(self, tar_path):
         self.tar_path = tar_path
+        self.temp_dir = tempfile.mkdtemp()
+        print(f"Создана временная директория: {self.temp_dir}")
         try:
-            self.tar = tarfile.open(tar_path, 'r')
-            print(f"Успешно открыт tar-архив: {tar_path}")
+            with tarfile.open(tar_path, 'r') as tar:
+                tar.extractall(self.temp_dir)
+                print(f"Архив {tar_path} извлечён во временную директорию.")
         except FileNotFoundError:
             messagebox.showerror("Ошибка", f"Архив виртуальной файловой системы не найден: {tar_path}")
             sys.exit(1)
@@ -56,46 +59,34 @@ class VirtualFileSystem:
         self.current_path = ''  # Инициализируем как пустую строку для корня
         print(f"Начальный текущий путь установлен: '{self.current_path}'")
 
+    def get_full_path(self, path):
+        """
+        Возвращает полный путь внутри временной директории для заданного относительного пути.
+        """
+        return os.path.normpath(os.path.join(self.temp_dir, self.current_path, path))
+
     def list_dir(self):
         """
         Возвращает списки директорий и файлов в текущем каталоге.
         """
-        members = self.tar.getmembers()
-        dirs = set()
-        files = set()
-        current_path = self.current_path.rstrip('/')  # Убираем завершающий слэш
-        print(f"\nПросмотр каталога. Текущий путь: '{current_path}'")
+        dirs = []
+        files = []
+        current_dir = os.path.join(self.temp_dir, self.current_path)
+        print(f"\nПросмотр каталога. Текущий путь: '{current_dir}'")
 
-        for member in members:
-            if member.name == './':
-                print(f"Пропуск члена: '{member.name}'")
-                continue
+        try:
+            with os.scandir(current_dir) as it:
+                for entry in it:
+                    if entry.is_dir():
+                        dirs.append(entry.name)
+                        print(f"Найдена директория: '{entry.name}'")
+                    elif entry.is_file():
+                        files.append(entry.name)
+                        print(f"Найден файл: '{entry.name}'")
+        except FileNotFoundError:
+            print(f"Директория не найдена: '{current_dir}'")
+            raise FileNotFoundError(f"Директория не найдена: {current_dir}")
 
-            normalized_name = member.name.lstrip('./')  # Убираем './' префикс
-            member_dir = os.path.dirname(normalized_name)
-            print(f"Обработка члена: '{member.name}', нормализованное имя: '{normalized_name}', директория члена: '{member_dir}'")
-
-            if current_path == '':
-                # Корневой каталог: файлы и директории без дополнительных слэшей
-                if member.isdir() and normalized_name.endswith('/') and normalized_name.count('/') == 1:
-                    dir_name = os.path.basename(normalized_name.rstrip('/'))
-                    dirs.add(dir_name)
-                    print(f"Найдена директория: '{dir_name}'")
-                elif not member.isdir() and normalized_name.count('/') == 0:
-                    file_name = os.path.basename(normalized_name)
-                    files.add(file_name)
-                    print(f"Найден файл: '{file_name}'")
-            else:
-                # Подкаталоги: проверяем соответствие текущему пути
-                if member_dir == current_path:
-                    name = os.path.basename(normalized_name)
-                    if member.isdir():
-                        dirs.add(name)
-                        print(f"Найдена директория: '{name}'")
-                    else:
-                        files.add(name)
-                        print(f"Найден файл: '{name}'")
-        print(f"Директории: {dirs}, Файлы: {files}\n")
         return sorted(dirs), sorted(files)
 
     def change_dir(self, path):
@@ -103,49 +94,82 @@ class VirtualFileSystem:
         Изменяет текущий каталог.
         """
         print(f"\nИзменение каталога на: '{path}'")
+        new_path = path
         if path == '..':
             if self.current_path != '':
                 self.current_path = os.path.dirname(self.current_path.rstrip('/'))
                 print(f"Перешли на уровень выше: '{self.current_path}'")
+            else:
+                print("Вы находитесь в корневом каталоге")
+            return
+        elif path.startswith('/'):
+            # Абсолютный путь от корня временной директории
+            new_path = path.lstrip('/')
         else:
-            # Обработка абсолютных путей
-            if path.startswith('/'):
-                new_path = path.lstrip('/')
-            else:
-                new_path = os.path.join(self.current_path, path).replace('\\', '/')
-            if not new_path.endswith('/'):
-                new_path += '/'
-            # Нормализация пути
-            new_path = os.path.normpath(new_path) + '/'
-            print(f"Нормализованный новый путь: '{new_path}'")
-            # Проверка существования директории
-            exists = any(m.name.rstrip('/') == f'./{new_path.rstrip("/")}' for m in self.tar.getmembers() if m.isdir())
-            print(f"Директория существует: {exists}")
-            if exists:
-                self.current_path = new_path.rstrip('/')
-                print(f"Текущий путь обновлён до: '{self.current_path}'")
-            else:
-                print(f"Нет такой директории: {path}")
-                raise FileNotFoundError(f"Нет такой директории: {path}")
+            # Относительный путь от текущей директории
+            new_path = os.path.normpath(os.path.join(self.current_path, path))
+
+        full_new_path = os.path.join(self.temp_dir, new_path)
+        if os.path.isdir(full_new_path):
+            # Нормализуем текущий путь относительно корня
+            self.current_path = os.path.relpath(full_new_path, self.temp_dir)
+            if self.current_path == '.':
+                self.current_path = ''
+            print(f"Текущий путь обновлён до: '{self.current_path}'")
+        else:
+            print(f"Нет такой директории: {path}")
+            raise FileNotFoundError(f"Нет такой директории: {path}")
 
     def get_pwd(self):
         """
         Возвращает текущий путь.
         """
-        return self.current_path
+        return '/' + self.current_path if self.current_path else '/'
 
     def extract_file(self, file_path):
         """
-        Извлекает содержимое файла из VFS.
+        Читает содержимое файла из VFS.
         """
-        try:
-            member = self.tar.getmember(file_path)
-            if member.isfile():
-                return self.tar.extractfile(member).read().decode('utf-8')
+        full_path = self.get_full_path(file_path)
+        print(f"Чтение файла: '{full_path}'")
+        if os.path.isfile(full_path):
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            except Exception as e:
+                raise e
+        else:
+            if os.path.isdir(full_path):
+                raise IsADirectoryError(f"'{file_path}' является директорией")
             else:
-                raise IsADirectoryError(f"{file_path} является директорией")
-        except KeyError:
-            raise FileNotFoundError(f"Нет такого файла: {file_path}")
+                raise FileNotFoundError(f"Нет такого файла: '{file_path}'")
+
+    def write_file(self, file_path, content):
+        """
+        Пишет содержимое в файл в VFS, создавая файл, если он не существует.
+        """
+        full_path = self.get_full_path(file_path)
+        directory = os.path.dirname(full_path)
+        print(f"Запись в файл: '{full_path}'")
+        if not os.path.exists(directory):
+            print(f"Директория '{directory}' не существует, создаём...")
+            os.makedirs(directory)
+        try:
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(f"Содержимое записано в файл '{full_path}'")
+        except Exception as e:
+            raise e
+
+    def cleanup(self):
+        """
+        Удаляет временную директорию.
+        """
+        print(f"Удаление временной директории: {self.temp_dir}")
+        try:
+            shutil.rmtree(self.temp_dir)
+        except Exception as e:
+            print(f"Не удалось удалить временную директорию: {e}")
 
 class ShellEmulatorGUI:
     """
@@ -173,14 +197,17 @@ class ShellEmulatorGUI:
         # Установка начального приглашения
         self.update_prompt()
         self.write_output(self.prompt, newline=False)
+        
+        # Обработка закрытия окна
+        self.master.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def update_prompt(self):
         """
         Обновляет приглашение к вводу.
         """
-        display_path = self.vfs.get_pwd() if self.vfs.get_pwd() != '' else '/'
+        display_path = self.vfs.get_pwd()
         self.prompt = f"{self.computer_name}:{display_path}$ "
-
+    
     def write_output(self, text, newline=True):
         """
         Записывает текст в область вывода.
@@ -192,7 +219,7 @@ class ShellEmulatorGUI:
             self.output_area.insert(tk.END, text)
         self.output_area.config(state='disabled')
         self.output_area.see(tk.END)
-
+    
     def process_command(self, event):
         """
         Обрабатывает введенную команду.
@@ -228,8 +255,13 @@ class ShellEmulatorGUI:
                     self.write_output("cp: требуется исходный и конечный файл")
             elif command == 'echo':
                 self.cmd_echo(' '.join(args))
+            elif command == 'cat':
+                if args:
+                    self.cmd_cat(args[0])
+                else:
+                    self.write_output("cat: отсутствует имя файла")
             elif command == 'exit':
-                self.master.quit()
+                self.on_close()
             else:
                 self.write_output(f"{command}: команда не найдена")
         except Exception as e:
@@ -237,71 +269,84 @@ class ShellEmulatorGUI:
         
         self.update_prompt()
         self.write_output(self.prompt, newline=False)
-
+    
     def cmd_ls(self):
         """
         Реализует команду 'ls'.
         """
         print("Выполнение команды 'ls'")
         dirs, files = self.vfs.list_dir()
-        if not dirs and not files:
-            self.write_output(".")
+        entries = dirs + files
+        if not entries:
             return
-        listing = '  '.join(dirs + files)
+        listing = '  '.join(entries)
         self.write_output(listing)
-
+    
     def cmd_cd(self, path):
         """
         Реализует команду 'cd'.
         """
         print(f"Выполнение команды 'cd' с аргументом: {path}")
         self.vfs.change_dir(path)
-
+    
     def cmd_pwd(self):
         """
         Реализует команду 'pwd'.
         """
         print("Выполнение команды 'pwd'")
         pwd = self.vfs.get_pwd()
-        display_pwd = pwd if pwd != '' else '/'
-        self.write_output(display_pwd)
-
+        self.write_output(pwd)
+    
     def cmd_cp(self, src, dest):
         """
         Реализует команду 'cp'.
-        Эмуляция копирования файлов внутри VFS.
         """
         print(f"Выполнение команды 'cp' с аргументами: {src}, {dest}")
         try:
-            # Проверка существования исходного файла
-            src_path = os.path.join(self.vfs.get_pwd(), src).strip('/')
-            src_member = self.vfs.tar.getmember(f'./{src_path}')
-            if not src_member.isfile():
-                self.write_output(f"cp: '{src}' не является файлом")
-                return
-            
-            # Проверка, что dest не существует
-            dest_path = os.path.join(self.vfs.get_pwd(), dest).strip('/')
+            src_full_path = self.vfs.get_full_path(src)
+            dest_full_path = self.vfs.get_full_path(dest)
+            if os.path.isfile(src_full_path):
+                shutil.copy2(src_full_path, dest_full_path)
+                self.write_output(f"Копирование '{src}' в '{dest}' выполнено")
+            else:
+                self.write_output(f"cp: невозможно найти '{src}': Нет такого файла")
+        except Exception as e:
+            self.write_output(f"Ошибка копирования: {e}")
+    
+    def cmd_echo(self, args_line):
+        """
+        Реализует команду 'echo' с поддержкой перенаправления в файл.
+        """
+        print(f"Выполнение команды 'echo' с аргументами: {args_line}")
+        if '>' in args_line:
+            # Разбиваем по символу '>'
+            parts = args_line.split('>', 1)
+            text = parts[0].strip().strip('"').strip("'")
+            file_name = parts[1].strip()
             try:
-                self.vfs.tar.getmember(f'./{dest_path}')
-                self.write_output(f"cp: не удалось скопировать в '{dest}': файл существует")
-                return
-            except KeyError:
-                pass  # Dest не существует, можно копировать
-            
-            # Эмуляция копирования: поскольку tar-архив не изменяется,
-            # мы просто сообщаем об успешном копировании.
-            self.write_output(f"cp: '{src}' в '{dest}' успешно скопировано (эмуляция)")
-        except KeyError:
-            self.write_output(f"cp: невозможно найти '{src}': файл или директория не существует")
-
-    def cmd_echo(self, text):
+                self.vfs.write_file(file_name, text)
+                print(f"Текст '{text}' записан в файл '{file_name}'")
+            except Exception as e:
+                self.write_output(f"echo: ошибка записи в файл '{file_name}': {e}")
+        else:
+            text = args_line.strip('"').strip("'")
+            self.write_output(text)
+    
+    def cmd_cat(self, filename):
         """
-        Реализует команду 'echo'.
+        Реализует команду 'cat'.
         """
-        print(f"Выполнение команды 'echo' с текстом: {text}")
-        self.write_output(text)
-
+        print(f"Выполнение команды 'cat' с аргументом: {filename}")
+        try:
+            content = self.vfs.extract_file(filename)
+            self.write_output(content)
+        except FileNotFoundError:
+            self.write_output(f"cat: {filename}: Нет такого файла или каталога")
+        except IsADirectoryError:
+            self.write_output(f"cat: {filename}: Это каталог")
+        except Exception as e:
+            self.write_output(f"cat: {filename}: {e}")
+    
     def log_action(self, command):
         """
         Логирует введенную команду в JSON-файл.
@@ -318,6 +363,14 @@ class ShellEmulatorGUI:
         except Exception as e:
             messagebox.showerror("Ошибка Логирования", f"Не удалось записать лог: {e}")
 
+    def on_close(self):
+        """
+        Обрабатывает закрытие приложения.
+        """
+        print("Завершение работы эмулятора.")
+        self.vfs.cleanup()
+        self.master.destroy()
+    
 def main():
     """
     Основная функция для запуска эмулятора.
@@ -342,8 +395,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
 ```
 

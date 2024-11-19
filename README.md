@@ -63,7 +63,14 @@ class VirtualFileSystem:
         """
         Возвращает полный путь внутри временной директории для заданного относительного пути.
         """
-        return os.path.normpath(os.path.join(self.temp_dir, self.current_path, path))
+        if path.startswith('/'):
+            # Абсолютный путь
+            new_path = os.path.normpath(path)
+        else:
+            # Относительный путь
+            new_path = os.path.normpath(os.path.join('/', self.current_path, path))
+        full_path = os.path.normpath(os.path.join(self.temp_dir, new_path.lstrip('/')))
+        return full_path
 
     def list_dir(self):
         """
@@ -71,7 +78,7 @@ class VirtualFileSystem:
         """
         dirs = []
         files = []
-        current_dir = os.path.join(self.temp_dir, self.current_path)
+        current_dir = self.get_full_path('')
         print(f"\nПросмотр каталога. Текущий путь: '{current_dir}'")
 
         try:
@@ -91,28 +98,33 @@ class VirtualFileSystem:
 
     def change_dir(self, path):
         """
-        Изменяет текущий каталог.
+        Изменяет текущий каталог, обеспечивая, чтобы он оставался внутри виртуальной файловой системы.
         """
         print(f"\nИзменение каталога на: '{path}'")
-        new_path = path
-        if path == '..':
-            if self.current_path != '':
-                self.current_path = os.path.dirname(self.current_path.rstrip('/'))
-                print(f"Перешли на уровень выше: '{self.current_path}'")
-            else:
-                print("Вы находитесь в корневом каталоге")
-            return
-        elif path.startswith('/'):
+
+        if not path:
+            path = ''  # Пустой путь означает домашний каталог (корень в нашем случае)
+
+        if path.startswith('/'):
             # Абсолютный путь от корня временной директории
-            new_path = path.lstrip('/')
+            new_path = os.path.normpath(path)
         else:
             # Относительный путь от текущей директории
-            new_path = os.path.normpath(os.path.join(self.current_path, path))
+            new_path = os.path.normpath(os.path.join('/', self.current_path, path))
+        # Теперь new_path нормализован и начинается с '/'
 
-        full_new_path = os.path.join(self.temp_dir, new_path)
+        full_new_path = os.path.normpath(os.path.join(self.temp_dir, new_path.lstrip('/')))
+        print(f"Новый полный путь: '{full_new_path}'")
+
+        # Проверяем, что новый путь находится внутри temp_dir
+        if os.path.commonpath([full_new_path, os.path.abspath(self.temp_dir)]) != os.path.abspath(self.temp_dir):
+            print("Отклонено: попытка выйти за пределы виртуальной файловой системы")
+            raise PermissionError("Отказано в доступе")
+
         if os.path.isdir(full_new_path):
-            # Нормализуем текущий путь относительно корня
+            # Обновляем текущий путь относительно корня VFS
             self.current_path = os.path.relpath(full_new_path, self.temp_dir)
+
             if self.current_path == '.':
                 self.current_path = ''
             print(f"Текущий путь обновлён до: '{self.current_path}'")
@@ -287,7 +299,12 @@ class ShellEmulatorGUI:
         Реализует команду 'cd'.
         """
         print(f"Выполнение команды 'cd' с аргументом: {path}")
-        self.vfs.change_dir(path)
+        try:
+            self.vfs.change_dir(path)
+        except FileNotFoundError:
+            self.write_output(f"cd: {path}: Нет такого каталога")
+        except PermissionError:
+            self.write_output("cd: Отказано в доступе")
     
     def cmd_pwd(self):
         """
